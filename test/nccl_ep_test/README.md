@@ -1,13 +1,15 @@
 # NCCL EP regression fixtures
 
 These fixtures support the registered tests for NCCL EP LL, CUDA Graph
-ownership, Triton expert compute, zero-token ranks and serial shared experts.
+ownership, Triton expert compute, zero-token ranks, shared experts,
+and the staged SBO/TBO execution paths.
 
 Run from the repository root with SGLang and pytest installed:
 
 ```bash
 PYTHONPATH=python:test python -m pytest -q \
-  test/registered/unit/layers/moe/test_nccl_ep_*.py
+  test/registered/unit/layers/moe/test_nccl_ep_*.py \
+  test/registered/unit/batch_overlap/test_tbo_logprob_metadata.py
 ```
 
 The CUDA tests use one GPU; SM89 is sufficient. They exercise production
@@ -17,7 +19,7 @@ NCCL EP communication. The oracle and prefill fallback tests also run on CPU.
 
 The fixtures retain independent routing/output oracles, temporary tensor
 lifetime checks, capture/replay ordering, shutdown/recapture failures, empty
-ranks and persistent resource ownership. Each registered test file exposes
+subbatches and per-lane resource ownership. Each registered test file exposes
 the repository CI entrypoint.
 
 The full-model benchmarks, native multi-rank experiments, Nsight analysis,
