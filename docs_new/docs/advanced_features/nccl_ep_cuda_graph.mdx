@@ -117,7 +117,8 @@ masked padding and controlled host capture failure. They compare against an
 independent CPU oracle using weighted synthetic experts. Full-model accuracy and
 real expert GEMM performance have not been evaluated for this Graph path.
 
-See the [reproduction instructions](https://github.com/sgl-project/sglang/tree/main/test/nccl_ep_test)
-for one-GPU lifecycle tests and the two-GPU correctness, benchmark and profiling
-commands. See [expert parallelism](/docs/advanced_features/expert_parallelism) for
-the surrounding MoE configuration.
+See the [regression fixtures](https://github.com/sgl-project/sglang/tree/main/test/nccl_ep_test)
+for one-GPU lifecycle tests. Native multi-rank benchmark and profiling drivers
+are maintained separately; the fixture README links their historical versions.
+See [expert parallelism](/docs/advanced_features/expert_parallelism) for the
+surrounding MoE configuration.

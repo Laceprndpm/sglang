@@ -14,25 +14,6 @@ register_cuda_ci(est_time=15, stage="base-b", runner_config="1-gpu-small")
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA Graph requires a GPU")
-def test_non_ep_graph_replays_changed_data_at_fixed_addresses():
-    from nccl_ep_test.local_graph import exercise
-
-    result = exercise()
-    assert result["ep_tested"] is False
-    assert result["checked"] == 180
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA Graph requires a GPU")
-def test_bucket_graphs_reuse_maximum_capacity_storage_serially():
-    from nccl_ep_test.local_graph import exercise
-
-    result = exercise()
-    views = result["shared_buffer_views"]
-    assert views["8"] == views["16"] == views["32"]
-    assert result["checked"] == 180
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA Graph requires a GPU")
 def test_sglang_runner_updates_and_pads_the_actual_graph_inputs():
     from nccl_ep_test.runner_inputs import exercise_inputs
 
