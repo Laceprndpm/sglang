@@ -4030,8 +4030,6 @@ class ServerArgs:
         unsupported = [
             name.replace("_", "-")
             for name in (
-                "enable_two_batch_overlap",
-                "enable_single_batch_overlap",
                 "enable_pdmux",
                 "enable_eplb",
                 "elastic_ep_backend",
@@ -6468,14 +6466,13 @@ class ServerArgs:
                 )
 
         if a2a_backend == "nccl_ep":
-            if self.enable_single_batch_overlap or self.enable_two_batch_overlap:
-                raise ValueError("NCCL EP LL does not support single/two batch overlap")
+            if self.enable_eplb:
+                raise ValueError("NCCL EP LL does not support EPLB")
             self._handle_nccl_ep_token_budget()
             if resolved_view(self).moe_runner_backend == "triton":
                 unsupported = [
                     name
                     for name in (
-                        "enable_eplb",
                         "enforce_shared_experts_fusion",
                         "enable_lora",
                     )

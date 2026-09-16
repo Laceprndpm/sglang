@@ -434,12 +434,15 @@ class TboDPAttentionPreparer:
                 token_num_per_seq=token_num_per_seq,
             )
             resolved_deepep_mode = deepep_mode.resolve(local_batch.is_extend_in_batch)
+            # NCCL EP bounds chunked prefill to its LL token budget at setup.
+            # It can use the staged path without DeepEP's normal-mode adapter.
             local_can_run_tbo = (self.local_tbo_split_seq_index is not None) and not (
                 (
                     local_batch.forward_mode.is_extend()
                     and not local_batch.forward_mode.is_target_verify()
                 )
                 and enable_a2a_moe
+                and not get_moe_a2a_backend().is_nccl_ep()
                 and (resolved_deepep_mode.is_low_latency())
             )
         else:
@@ -793,12 +796,13 @@ class TboForwardBatchPreparer:
                 global_num_tokens_for_logprob_gpu=None,
                 global_num_tokens_for_logprob_cpu=None,
                 sampling_info=None,
-                # For logits and logprobs post processing, thus we do not care
+                # Logits/logprobs use the parent after child hidden states merge.
                 temperature=None,
                 top_p=None,
                 mm_inputs=None,
                 top_logprobs_nums=None,
                 token_ids_logprobs=None,
+                extend_input_logprob_token_ids_gpu=None,
                 next_token_logits_buffer=None,
                 return_hidden_states_before_norm=False,
                 # TBO children start unplanned — planned by the TBO-aware init
@@ -1092,6 +1096,13 @@ class MaybeTboDeepEPDispatcher(BaseDispatcher):
         elif get_moe_a2a_backend().is_nixl():
             self._inners = [
                 NixlEPDispatcher(**kwargs) for _ in range(num_inner_dispatchers)
+            ]
+        elif get_moe_a2a_backend().is_nccl_ep():
+            from sglang.srt.layers.moe.token_dispatcher.nccl_ep import NcclEpDispatcher
+
+            self._inners = [
+                NcclEpDispatcher(instance_id=i, **kwargs)
+                for i in range(num_inner_dispatchers)
             ]
 
     @property
