@@ -153,6 +153,19 @@ staged ordering, dynamic routing, empty subbatches and per-lane resource ownersh
 Native two-GPU correctness and overlap profiling for these extensions remain
 pending; local passes do not establish native communication correctness or speedup.
 
+## Opt-in multistream execution
+
+Add `--enable-nccl-ep-multistream` with `--enable-two-batch-overlap`
+and/or `--enable-single-batch-overlap`. The option defaults to disabled and
+requires single-node CUDA, DeepSeek V2/V3 block-128 FP8 experts, and the Triton
+MoE runner. EPLB, PDMux, compile, memory saver and speculation are unsupported.
+Each TBO lane owns its communication stream, group, handle and scratch.
+Separate compute streams require independent Triton attention children,
+attention TP=1 and dense TP=1. Other attention workspaces or unsupported
+allocators retain the existing compute stream. Graph buckets and replays
+remain serialized. Enabling overlap does not guarantee an end-to-end speedup;
+the measured DeepSeek-V2-Lite workload currently regresses against serial.
+
 See the [test instructions](https://github.com/sgl-project/sglang/tree/main/test/nccl_ep_test)
 for local lifecycle regressions and the inherited native correctness, benchmark
 and profiling commands. The native synthetic check is in

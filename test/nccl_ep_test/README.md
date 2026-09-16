@@ -101,3 +101,36 @@ first-use JIT are excluded from the timed samples. Profiling adds overhead and
 must not be used to derive the unprofiled speedup.
 
 See [the recorded validation](validation.md) for the tested snapshot and results.
+
+## Multistream regression
+
+Add `--enable-nccl-ep-multistream` to a compatible NCCL EP LL configuration
+with `--enable-two-batch-overlap` and/or `--enable-single-batch-overlap`.
+The option is disabled by default and requires single-node CUDA, DeepSeek
+V2/V3 block-128 FP8 experts and the Triton MoE runner. EPLB migration is not
+supported with this option.
+
+Each TBO lane retains its own communication stream, group, handle and scratch.
+With separate Triton attention children, attention TP=1 and dense TP=1, the
+existing staged executor also submits each lane's compute on a separate
+stream. Other attention backends keep compute on the existing stream because
+their children may share mutable workspace. A shared zero allocator keeps its
+backing storage alive across both streams; unsupported allocator types and
+TP collective paths retain the existing compute stream. Graph replays and
+buckets remain serial. Streams are initialized during warmup and reused
+during capture and replay.
+
+The tests cover producer/consumer ordering, independent lane completion,
+captured tensor lifetimes, shared allocator slices, dynamic routing and the
+existing staged model paths:
+
+```bash
+PYTHONPATH=python:test python -m pytest -q \
+  test/registered/unit/layers/moe/test_nccl_ep_multistream.py \
+  test/registered/unit/layers/moe/test_nccl_ep_multistream_config.py
+```
+
+These tests use real CUDA streams and Graphs with external EP replaced.
+They detect completion incorrectly waiting for independent compute, but do
+not measure native communication overlap or model speedup. The opt-in
+batch-invariant router and full-model logit diagnostics are separate changes.
