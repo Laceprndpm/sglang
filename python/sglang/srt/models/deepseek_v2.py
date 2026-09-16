@@ -584,14 +584,16 @@ class DeepseekV2MoE(nn.Module):
         self.config = config
         self.layer_id = layer_id
         self.alt_stream = alt_stream
-        self._nccl_ep_serial_shared_experts = (
-            get_moe_a2a_backend().is_nccl_ep() and get_moe_runner_backend().is_triton()
+        self._nccl_ep_shared_experts_on_current_stream = (
+            get_moe_a2a_backend().is_nccl_ep()
         )
         if (
-            self._nccl_ep_serial_shared_experts
+            self._nccl_ep_shared_experts_on_current_stream
             and envs.SGLANG_BLACKWELL_OVERLAP_SHARED_EXPERTS_OUTSIDE_SBO.get()
         ):
-            raise ValueError("NCCL EP Triton requires serial shared experts")
+            raise ValueError(
+                "NCCL EP shared experts use the current stream; use SBO to overlap dispatch"
+            )
         self.is_nextn = is_nextn
 
         n_hash_layers = getattr(config, "num_hash_layers", 0)
@@ -805,6 +807,7 @@ class DeepseekV2MoE(nn.Module):
             or get_moe_a2a_backend().is_nixl()
             or get_moe_a2a_backend().is_mori()
             or get_moe_a2a_backend().is_ascend_fuseep()
+            or get_moe_a2a_backend().is_nccl_ep()
         ):
             # TODO: we will support tp < ep in the future
             self.ep_size = get_parallel().moe_ep_size
@@ -1216,9 +1219,11 @@ class DeepseekV2MoE(nn.Module):
     ) -> torch.Tensor:
         shared_output = None
         # Disabling SBO alone does not disable this model's auxiliary stream.
-        # The NCCL EP Triton compatibility path keeps shared MLP and EP work
-        # ordered on the current stream, including full Graph capture.
-        shared_stream = None if self._nccl_ep_serial_shared_experts else self.alt_stream
+        # NCCL EP issues shared MLP work on the current stream: before dispatch
+        # by default, or between send_only and complete when SBO is enabled.
+        shared_stream = (
+            None if self._nccl_ep_shared_experts_on_current_stream else self.alt_stream
+        )
         sbo_enabled_flag = self._fuse_shared_experts_inside_sbo and not self.is_nextn
         sbo_overlap_dispatch_flag = (
             sbo_enabled_flag and SboFlags.enable_dispatch_shared_one_stream_overlap()
@@ -1267,7 +1272,8 @@ class DeepseekV2MoE(nn.Module):
 
             def _deepep_dispatch_hook(dispatcher: BaseDispatcher):
                 nonlocal shared_output
-                shared_output = self._forward_shared_experts(hidden_states)
+                if hidden_states.shape[0] > 0:
+                    shared_output = self._forward_shared_experts(hidden_states)
                 for handle in deepep_dispatch_hook_handle:
                     handle.remove()
 
@@ -1305,6 +1311,8 @@ class DeepseekV2MoE(nn.Module):
                     _deepep_dispatch_hook
                 )
             )
+            if isinstance(self.experts.dispatcher, NcclEpDispatcher):
+                deepep_dispatch_hook_handle = [deepep_dispatch_hook_handle]
             post_dispatch_hook_handle = (
                 self.experts.dispatcher.register_post_dispatch_hook(_post_dispatch_hook)
             )
@@ -1543,6 +1551,10 @@ class DeepseekV2MoE(nn.Module):
 
     def op_output(self, state):
         final_hidden_states = state.pop("hidden_states_after_combine")
+        scaling_fused = _use_aiter or (
+            get_moe_a2a_backend().is_nccl_ep()
+            and self.experts.should_fuse_routed_scaling_factor_in_topk
+        )
 
         if get_moe_a2a_backend().is_mori():
             num_tokens = state.pop("num_tokens")
@@ -1550,12 +1562,12 @@ class DeepseekV2MoE(nn.Module):
 
         if (shared_output := state.pop("shared_output")) is not None:
             x = shared_output
-            if _use_aiter:
+            if scaling_fused:
                 x.add_(final_hidden_states)
             else:
                 x.add_(final_hidden_states, alpha=self.routed_scaling_factor)
             final_hidden_states = x
-        elif _use_aiter:
+        elif scaling_fused:
             # fused in aiter_biased_grouped_topk so we can skip here
             pass
         else:
